@@ -32,6 +32,21 @@ const DEFAULTS := {
 	"curl_scale": 0.004,      # ノイズの空間周波数 (1/px)
 	"curl_speed": 0.5,        # ノイズの時間変化速度
 	"curl_idle": 0.25,        # プレイヤー静止時にも残るノイズの割合
+	# HULA HOOP モード
+	"hoop_radius": 150.0,       # 静止時の輪の半径 (px)
+	"hoop_radius_gain": 70.0,   # パワー最大時に広がる半径 (px)
+	"hoop_push": 8.0,           # 回転方向の入力 1 あたりの角加速度 (rad/s^2)
+	"hoop_start_boost": 3.5,    # 輪が落ちている間の入力の効き倍率（回し始めを楽にする）
+	"hoop_reverse_angle": 120.0, # 進行方向からこの角度以上ずれた入力を逆入力とみなす (度)
+	"hoop_reverse_brake": 1.6,  # 逆方向入力の減速倍率（大きいほど逆入力で落ちやすい）
+	"hoop_min_omega": 2.5,      # これ未満の角速度で円運動が途切れる (rad/s)
+	"hoop_max_omega": 10.0,     # 角速度の上限 (rad/s)
+	"hoop_sustain_decay": 0.0,  # 回っている間の自然減衰 (/s)。0 = パワー維持
+	"hoop_drop_decay": 1.2,     # 途切れた後の減衰 (/s)
+	"hoop_radial_push": 900.0,  # 半径方向の入力で輪が揺れる強さ
+	"hoop_hip": 36.0,           # 入力に合わせて自機（腰）が揺れる幅 (px)
+	"hoop_swipe_ref": 1400.0,   # SWIPE 入力で入力 1.0 とみなす指の速さ (px/s)
+	"hoop_enemy_speed": 70.0,   # 自機へ寄ってくる敵の速さ (px/s)
 	# 敵
 	"enemy_max": 10,
 	"enemy_interval": 0.8,    # 秒
@@ -74,13 +89,20 @@ func reset() -> void:
 	apply_preset("Loose")
 
 
+## オプション追従モードのプリセット。HULA HOOP の値（hoop_*）は変えない
 func apply_preset(preset_name: String) -> void:
-	var keep := {}
-	for k in RUNTIME_KEYS:
-		keep[k] = values.get(k, DEFAULTS[k])
-	values = DEFAULTS.duplicate()
+	for k in DEFAULTS:
+		if k in RUNTIME_KEYS or k.begins_with("hoop_"):
+			continue
+		values[k] = DEFAULTS[k]
 	values.merge(PRESETS.get(preset_name, {}), true)
-	values.merge(keep, true)
+	changed.emit()
+
+
+## 指定したキーだけ既定値に戻す
+func reset_keys(keys: Array) -> void:
+	for k in keys:
+		values[k] = DEFAULTS[k]
 	changed.emit()
 
 
@@ -118,11 +140,16 @@ func _on_changed() -> void:
 		get_tree().create_timer(0.5, true, false, true).timeout.connect(_save)
 
 
+## 既定値から変えた値だけを保存する（既定値を更新したときに古い値が残らないように）
 func _save() -> void:
 	_save_pending = false
+	var diff := {}
+	for k in values:
+		if k != "slow_motion" and not is_equal_approx(float(values[k]), float(DEFAULTS[k])):
+			diff[k] = values[k]
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify(values))
+		f.store_string(JSON.stringify(diff))
 
 
 func _load() -> void:

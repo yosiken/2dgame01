@@ -1,5 +1,15 @@
 # 2D シューティング: プレイヤー & オプション挙動モック 仕様書
 
+> 起動するとタイトルメニュー（OPTION LAB）が表示され、2 つのモードを選べる。
+> 各ゲーム画面の右上 `MENU` でタイトルに戻る。
+>
+> | モード | 内容 | 仕様 |
+> |---|---|---|
+> | OPTION FOLLOW | 自機を自由に動かし、遅れて付いてくるオプション（複数）で敵を倒す | この文書 |
+> | HULA HOOP | 入力でオプション（1 個）に力を加え、フラフープのように回し続けて敵を倒す | [SPEC_HOOP.md](SPEC_HOOP.md) |
+>
+> 以下は OPTION FOLLOW モードの仕様。
+
 ## 1. 目的
 
 縦画面スマホ向け 2D シューティングの「自機」と「オプション（子機）」の動きを検証するためのモック。
@@ -133,7 +143,8 @@ m_i = mass × (1 + i × mass_step)
 **下半分で自機を動かしながら** オプションの動きを確認・調整できる。
 UI 文字は英語（Web 版の既定フォントに日本語グリフが無いため）。
 
-- 値は変更のたびに端末へ自動保存され（`user://tuning.json`）、次回起動時も残る。
+- 値は変更のたびに端末へ自動保存され（`user://tuning.json`、既定値から変えた値だけ）、次回起動時も残る。
+- プリセットと Reset は OPTION FOLLOW の値だけを変える（HULA HOOP の値はそのまま）。
 - 各スライダーの左右にある `-` / `+` で 1 ステップずつ微調整できる。
 
 ### ボタン
@@ -212,7 +223,10 @@ UI 文字は英語（Web 版の既定フォントに日本語グリフが無い�
 ```
 project.godot              プロジェクト設定（縦画面・Compatibility・タッチ設定）
 export_presets.cfg         Web / Android エクスポート設定
-scenes/main.tscn           エントリ（ノードは main.gd がコードで生成）
+scenes/title.tscn          タイトルメニュー（起動シーン）
+scripts/title.gd           モード選択
+scenes/main.tscn           OPTION FOLLOW（ノードは main.gd がコードで生成）
+scenes/hoop.tscn           HULA HOOP（docs/SPEC_HOOP.md）
 scripts/tuning.gd          調整パラメータ・プリセット・保存（オートロード Tuning）
 scripts/main.gd            組み立て・入力・敵出現・スコア
 scripts/player.gd          自機・移動履歴

@@ -5,9 +5,9 @@ config_version=5
 
 [application]
 
-config/name="Option Follow Mock"
+config/name="Option Lab"
 config/description="2D shooter player/option movement mock (mobile)"
-run/main_scene="res://scenes/main.tscn"
+run/main_scene="res://scenes/title.tscn"
 config/features=PackedStringArray("4.3", "GL Compatibility")
 config/icon="res://icon.svg"
 

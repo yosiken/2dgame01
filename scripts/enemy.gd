@@ -1,11 +1,17 @@
 extends Area2D
 ## 敵。画面内をゆっくり漂う。オプションに触れると破壊される（HP 1）。
+## approach_target を設定すると、その位置へ向かって歩いてくる（HULA HOOP モード）。
 
 signal destroyed(enemy: Area2D, impact: Vector2)
+signal reached(enemy: Area2D)
+
+const REACH_DIST := 44.0
 
 const RADIUS := 30.0
 
 var velocity := Vector2.ZERO
+var approach_target: Node2D
+var approach_speed := 80.0
 var _spin := 0.0
 var _angle := 0.0
 var _age := 0.0
@@ -33,6 +39,15 @@ func _physics_process(delta: float) -> void:
 	_age += delta
 	scale = Vector2.ONE * minf(_age / 0.25, 1.0)
 	_angle += _spin * delta
+	if approach_target != null:
+		velocity = velocity.lerp((approach_target.position - position).normalized() * approach_speed, 1.0 - exp(-2.0 * delta))
+		position += velocity * delta
+		if not _dead and position.distance_to(approach_target.position) < REACH_DIST:
+			_dead = true
+			reached.emit(self)
+			queue_free()
+		queue_redraw()
+		return
 	position += velocity * delta
 	var rect := get_viewport_rect().grow(-RADIUS)
 	if position.x < rect.position.x or position.x > rect.end.x:

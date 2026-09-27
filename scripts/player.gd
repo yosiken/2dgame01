@@ -9,13 +9,16 @@ var input_vector := Vector2.ZERO   # スティック / キーボード入力 (�
 var drag_delta := Vector2.ZERO     # 相対ドラッグの今フレームの移動量 (px)
 var velocity := Vector2.ZERO       # 実際の移動速度 (px/s)
 var movement_energy := 0.0         # 直近の移動量 0..~1.5（オプションのノイズ強度に使う）
+var external_control := false      # true: 位置はゲーム側が直接動かす（HULA HOOP モード）
 
 var _history := PackedVector2Array()
 var _head := 0
 var _bank := 0.0
+var _last_pos := Vector2.ZERO
 
 
 func _ready() -> void:
+	_last_pos = position
 	reset_history()
 
 
@@ -39,7 +42,9 @@ func get_past_position(frames: float) -> Vector2:
 
 func _physics_process(delta: float) -> void:
 	var prev := position
-	if Tuning.i("control_mode") == 1:
+	if external_control:
+		prev = _last_pos
+	elif Tuning.i("control_mode") == 1:
 		position += drag_delta * Tuning.v("drag_sensitivity")
 	else:
 		var target_vel := input_vector.limit_length(1.0) * Tuning.v("player_speed")
@@ -49,6 +54,7 @@ func _physics_process(delta: float) -> void:
 
 	var rect := get_viewport_rect()
 	position = position.clamp(rect.position + Vector2.ONE * RADIUS, rect.end - Vector2.ONE * RADIUS)
+	_last_pos = position
 
 	var moved := position - prev
 	velocity = moved / delta
