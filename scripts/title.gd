@@ -10,7 +10,7 @@ const MODES := [
 	},
 	{
 		"title": "HULA HOOP",
-		"desc": "Your input pushes the hoop, not the ship.\nRotate with the spin to build power.\nPush against it and the hoop drops.",
+		"desc": "Your input pushes the hoop, not the ship.\nRotate with the spin to build power.\nRelease to throw it like a boomerang.",
 		"scene": "res://scenes/hoop.tscn",
 		"color": Color(1.0, 0.35, 0.65),
 	},

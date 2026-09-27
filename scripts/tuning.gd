@@ -47,6 +47,13 @@ const DEFAULTS := {
 	"hoop_hip": 36.0,           # 入力に合わせて自機（腰）が揺れる幅 (px)
 	"hoop_swipe_ref": 1400.0,   # SWIPE 入力で入力 1.0 とみなす指の速さ (px/s)
 	"hoop_enemy_speed": 70.0,   # 自機へ寄ってくる敵の速さ (px/s)
+	"hoop_throw_time": 0.35,        # 投げてからまっすぐ進む時間 (s)
+	"hoop_throw_speed_min": 300.0,  # パワー 0% での投げる速さ (px/s)
+	"hoop_throw_speed_max": 1700.0, # パワー 100% での投げる速さ (px/s)。距離 = 速さ × 時間
+	"hoop_throw_aim": 0.0,          # 投げる方向: 0 = 輪の進行方向（接線）/ 1 = 直前の入力方向
+	"hoop_return_turn": 7.0,        # 戻るときの旋回の強さ (rad/s)。小さいほど大きな弧
+	"hoop_return_speed": 1300.0,    # 戻るときの速さ (px/s)
+	"hoop_throw_cost": 0.2,         # 投げると失うパワーの割合
 	# 敵
 	"enemy_max": 10,
 	"enemy_interval": 0.8,    # 秒

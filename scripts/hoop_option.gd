@@ -4,7 +4,10 @@ extends Area2D
 ##  - 同じ向きに入力 → 加速、逆向きに入力 → 減速（hoop_reverse_brake 倍で効く）
 ##  - 円運動が続いている間（|ω| >= hoop_min_omega）はパワーを維持する
 ##  - 途切れると輪が落ちる（半径が縮み、hoop_drop_decay で止まっていく）
-## 回っている間だけ敵を破壊できる。
+## 回っている間に手を離すと（throw）、軌道を外れて飛んでいき、弧を描いて戻ってくる（ブーメラン）。
+##  - OUT: 投げた方向へ hoop_throw_time 秒まっすぐ進む。速さ（= 飛距離）は溜めたパワーで決まる
+##  - RETURN: 自機の方へ少しずつ曲がりながら戻り、輪の軌道に触れたらキャッチして円運動に戻る
+## 回っている間と飛んでいる間は敵を破壊できる。
 
 const RADIUS := 22.0
 const TRAIL_LEN := 18
@@ -18,6 +21,13 @@ var radius := 90.0                 # 現在の半径 (px)
 var radius_vel := 0.0
 var spinning := false              # 円運動が続いているか
 var push_amount := 0.0             # 今フレームの接線方向入力（+ 加速 / - 減速）。表示用
+
+enum State { ORBIT, OUT, RETURN }
+var state := State.ORBIT
+var fly_vel := Vector2.ZERO        # 飛行中の速度 (px/s)
+var _fly_t := 0.0
+var _saved_omega := 0.0            # 投げたときの角速度（キャッチ時に戻す）
+var _last_input_dir := Vector2.ZERO
 
 var _trail: Array[Vector2] = []
 var _pulse := 0.0
@@ -52,9 +62,107 @@ func speed() -> float:
 	return absf(omega) * radius
 
 
+func is_flying() -> bool:
+	return state != State.ORBIT
+
+
+## 投げる方向（進行方向の接線と、直前の入力方向を hoop_throw_aim でブレンド）
+func throw_direction() -> Vector2:
+	var along := tangent() * signf(omega)
+	if _last_input_dir == Vector2.ZERO:
+		return along
+	return along.slerp(_last_input_dir, Tuning.v("hoop_throw_aim")).normalized()
+
+
+func throw_speed() -> float:
+	return lerpf(Tuning.v("hoop_throw_speed_min"), Tuning.v("hoop_throw_speed_max"), power())
+
+
+## まっすぐ進む距離（プレビュー用）
+func throw_distance() -> float:
+	return throw_speed() * Tuning.v("hoop_throw_time")
+
+
+## 手を離したときに呼ぶ。回っていなければ投げられない
+func throw() -> bool:
+	if state != State.ORBIT or not spinning:
+		return false
+	fly_vel = throw_direction() * throw_speed()
+	_saved_omega = omega * (1.0 - Tuning.v("hoop_throw_cost"))
+	state = State.OUT
+	_fly_t = 0.0
+	_pulse = 1.0
+	return true
+
+
 func _physics_process(delta: float) -> void:
 	if player == null:
 		return
+	if input_vector.length() > 0.3:
+		_last_input_dir = input_vector.normalized()
+	if state == State.ORBIT:
+		_orbit_process(delta)
+	else:
+		_flight_process(delta)
+	_trail.push_front(position)
+	if _trail.size() > TRAIL_LEN:
+		_trail.pop_back()
+	_pulse = maxf(_pulse - delta * 3.0, 0.0)
+	queue_redraw()
+
+
+func _flight_process(delta: float) -> void:
+	_fly_t += delta
+	if state == State.OUT:
+		position += fly_vel * delta
+		_bounce_on_screen_edges()
+		if _fly_t >= Tuning.v("hoop_throw_time"):
+			state = State.RETURN
+			_fly_t = 0.0
+		return
+
+	# RETURN: 自機の方向へ有限の旋回速度で曲がる（時間とともに旋回を強めて必ず戻る）
+	var to_player := player.position - position
+	var turn := Tuning.v("hoop_return_turn") * (1.0 + _fly_t * 2.0) * delta
+	var diff := wrapf(to_player.angle() - fly_vel.angle(), -PI, PI)
+	fly_vel = fly_vel.rotated(clampf(diff, -turn, turn))
+	# 折り返し地点で減速してから戻る（ブーメランらしさ・行き過ぎ防止）
+	var spd := move_toward(fly_vel.length(), Tuning.v("hoop_return_speed"), 4500.0 * delta)
+	fly_vel = fly_vel.normalized() * spd
+	position += fly_vel * delta
+	_bounce_on_screen_edges()
+
+	var catch_r := Tuning.v("hoop_radius") + Tuning.v("hoop_radius_gain") * power() + 12.0
+	if to_player.length() <= catch_r or _fly_t > 4.0:
+		_catch()
+
+
+## 画面の端で跳ね返る（輪を見失わないように）
+func _bounce_on_screen_edges() -> void:
+	var rect := get_viewport_rect().grow(-RADIUS)
+	if position.x < rect.position.x or position.x > rect.end.x:
+		fly_vel.x = -fly_vel.x
+		_pulse = 0.6
+	if position.y < rect.position.y or position.y > rect.end.y:
+		fly_vel.y = -fly_vel.y
+		_pulse = 0.6
+	position = position.clamp(rect.position, rect.end)
+
+
+## 軌道に戻る。回転方向は投げる前と同じにし（入力を回す向きを変えずに続けられる）、
+## 投げたときのパワー（hoop_throw_cost 分を引いたもの）を引き継ぐ
+func _catch() -> void:
+	var rel := position - player.position
+	angle = rel.angle()
+	radius = maxf(rel.length(), RADIUS * 2.0)
+	radius_vel = 0.0
+	omega = _saved_omega
+	spinning = absf(omega) >= Tuning.v("hoop_min_omega")
+	state = State.ORBIT
+	_pulse = 1.0
+
+
+func _orbit_process(delta: float) -> void:
 	var t := tangent()
 	var outward := Vector2.from_angle(angle)
 
@@ -100,15 +208,14 @@ func _physics_process(delta: float) -> void:
 
 	position = player.position + Vector2.from_angle(angle) * radius
 
-	_trail.push_front(position)
-	if _trail.size() > TRAIL_LEN:
-		_trail.pop_back()
-	_pulse = maxf(_pulse - delta * 3.0, 0.0)
-	queue_redraw()
-
 
 func _on_area_entered(area: Area2D) -> void:
-	if spinning and area.has_method("hit"):
+	if not area.has_method("hit"):
+		return
+	if is_flying():
+		area.hit(fly_vel)
+		_pulse = 1.0
+	elif spinning:
 		area.hit(tangent() * omega * radius)
 		_pulse = 1.0
 
@@ -116,6 +223,9 @@ func _on_area_entered(area: Area2D) -> void:
 func _draw() -> void:
 	var p := power()
 	var col := Color(1.0, 0.66, 0.2).lerp(Color(1.0, 0.25, 0.6), p) if spinning else Color(0.5, 0.5, 0.6)
+	if is_flying():
+		col = Color(0.4, 0.9, 1.0)
+		p = 1.0
 	# 軌跡（速いほど長く太く）
 	for k in range(1, _trail.size()):
 		var a := 1.0 - float(k) / TRAIL_LEN

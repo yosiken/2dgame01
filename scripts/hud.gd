@@ -50,6 +50,15 @@ const HOOP_TABS := {
 		["hoop_sustain_decay", "Decay while spinning", 0.0, 1.0, 0.01],
 		["hoop_drop_decay", "Decay after break", 0.0, 5.0, 0.1],
 	],
+	"Throw": [
+		["hoop_throw_time", "Straight time (s)", 0.05, 1.5, 0.05],
+		["hoop_throw_speed_min", "Speed at 0% power", 0.0, 2000.0, 50.0],
+		["hoop_throw_speed_max", "Speed at 100% power", 200.0, 5000.0, 50.0],
+		["hoop_throw_aim", "Aim (0=spin 1=input)", 0.0, 1.0, 0.05],
+		["hoop_return_turn", "Return turn (arc)", 0.5, 20.0, 0.5],
+		["hoop_return_speed", "Return speed", 200.0, 4000.0, 50.0],
+		["hoop_throw_cost", "Power lost per throw", 0.0, 1.0, 0.05],
+	],
 	"Shape": [
 		["hoop_radius", "Radius", 60.0, 320.0, 5.0],
 		["hoop_radius_gain", "Radius gain at max", 0.0, 200.0, 5.0],
