@@ -28,7 +28,7 @@
 | 画面のどこでもタッチ & ドラッグ（STICK モード, 既定） | 触れた位置を中心にフローティング仮想スティックが出現。倒した方向・量に応じて全方向へ移動。半径 110px を超えて指を動かすとスティック中心が指に付いてくる。デッドゾーン 12% |
 | 同上（DRAG モード） | 指の移動量 × 感度 だけ自機が相対移動（一般的なスマホ STG 方式） |
 | 矢印キー / WASD | PC 確認用の 8 方向移動 |
-| 右上 `TUNE` ボタン | 調整パネルの開閉 |
+| 右上 `DEBUG` ボタン / Tab キー | デバッグパネルの開閉 |
 
 - マウスはタッチとしてエミュレートされる（`emulate_touch_from_mouse`）。
 - 1 本目の指だけを操作に使う（マルチタッチの 2 本目以降は無視）。
@@ -50,11 +50,17 @@
 
 ### 5.1 追従目標
 
-オプション `i`（0 始まり）の目標位置:
+オプション `i`（0 始まり）の目標位置は、2 つの目標のブレンド:
 
 ```
-target_i = 自機履歴の (delay_frames × (i + 1)) フレーム前の位置（小数は線形補間）
+trail_i = 自機履歴の (delay_frames × (i + 1)) フレーム前の位置（小数は線形補間）
+rope_i  = leader + normalize(pos - leader) × chain_length   // leader = 1 つ前のオプション（先頭は自機）
+target  = lerp(trail_i, rope_i, chain)
 ```
+
+- `chain = 0`: グラディウス式に自機の軌跡をなぞる。
+- `chain = 1`: 前のオプションに長さ `chain_length` の紐でぶら下がる（鎖・しっぽのような動き）。
+- 中間でも、前のオプションが揺れると後ろへ揺れが伝わる。
 
 ### 5.2 質量
 
@@ -62,20 +68,22 @@ target_i = 自機履歴の (delay_frames × (i + 1)) フレーム前の位置（
 m_i = mass × (1 + i × mass_step)
 ```
 
-後ろのオプションほど重く、遅れ・オーバーシュート・ドリフトが大きくなる。
+後ろのオプションほど重く、遅れやオーバーシュート、ドリフトが大きくなる。
 
 ### 5.3 運動方程式（毎物理フレーム, 60Hz）
 
-1. **バネ・ダンパ（遅れ追従）**
+1. **バネ・ダンパ（ルーズな遅れ追従）**
    ```
-   desired_vel = (target - pos) × follow_gain
-   accel       = (desired_vel - vel) × drive / m
+   c     = 2 × damping × √(spring_k × m)       // damping = 減衰比 ζ
+   accel = (spring_k × (target - pos) - c × vel) / m
    ```
-   実効バネ定数 `K = follow_gain × drive / m`、減衰 `c = drive / m`。
-   既定値（m=1.4）で減衰比 ζ ≈ 0.63 → 少しオーバーシュートする。重いほど ζ・K が下がり、遅れて大きく振れる。
+   - `spring_k`（バネ定数）: 大きいほど強く引かれ、振動が速くなる。固有振動数は `√(k/m)` [rad/s]。
+   - `damping`（減衰比 ζ）: 1 で振動なしにぴたりと止まる。小さいほど何度も行き過ぎてビヨンビヨン揺れる。
+   - 速度に比例する減衰を使うので、移動中は `c × 速度 / k` だけ遅れる（ルーズさの要因）。
+   - 既定（Loose）: k = 45, ζ = 0.22, m = 1.2 → 約 1Hz でゆったり揺れ、数回行き過ぎてから落ち着く。
 
 2. **車の挙動**
-   - オプションは「車体の向き `heading`」を持つ。`heading` は `desired_vel` の方向へ
+   - オプションは「車体の向き `heading`」を持つ。`heading` は目標の方向へ
      `turn_rate / m` [rad/s] でしか回転できない（重いほど曲がりにくい）。
    - 加速度を車体の前後成分と横成分に分解し、前後（アクセル/ブレーキ）は 100%、
      横は `side_accel` 倍だけ加える（0 で完全に車、1 で自由な質点）。
@@ -100,7 +108,8 @@ m_i = mass × (1 + i × mass_step)
 - オレンジの発光球（半径 20px）+ 移動の残像トレイル（14 フレーム）。
 - 白い線 = 車体の向き。速度方向とずれていればドリフト中。
 - 敵に当たるとパルス（一瞬拡大）。
-- Debug ON 時: 緑の十字 = 追従目標、緑線 = 目標とのずれ、青線 = 速度。
+- `Lines: ON` 時: ギザギザ線 = バネ（目標とのずれ。伸びるほど緑 → 赤）、十字 = 追従目標、
+  紫線 = チェーン（前のオプションとの紐）、青線 = 速度。
 
 ## 6. 敵（Enemy）
 
@@ -118,40 +127,85 @@ m_i = mass × (1 + i × mass_step)
 | 2 | オプション（Area2D, monitoring） | 3 |
 | 3 | 敵（Area2D, monitorable） | なし |
 
-## 7. 調整パネル（TUNE）
+## 7. デバッグパネル（DEBUG）
 
-実行中にスライダーで全パラメータを変更可能。`Reset` で既定値に戻す。
+右上の `DEBUG` ボタン（PC では Tab キー）で開閉する。パネルは画面の上半分だけを使うので、
+**下半分で自機を動かしながら** オプションの動きを確認・調整できる。
 UI 文字は英語（Web 版の既定フォントに日本語グリフが無いため）。
+
+- 値は変更のたびに端末へ自動保存され（`user://tuning.json`）、次回起動時も残る。
+- 各スライダーの左右にある `-` / `+` で 1 ステップずつ微調整できる。
+
+### ボタン
+
+| ボタン | 動作 |
+|---|---|
+| Preset: Loose / Tight / Jelly / Drift | タップごとにプリセットを切り替える（下表） |
+| Lines: ON/OFF | バネ・目標・チェーン・速度の線を表示 |
+| Slow: ON/OFF | スローモーション（0.3 倍速）。揺れ方の観察用 |
+| Mode: STICK/DRAG | 操作方式の切り替え |
+| Reset | Loose（既定値）に戻す |
+| Copy | 既定値から変えた値を JSON でクリップボードへコピー（調整結果の共有用） |
+
+### プリセット
+
+| 名前 | 特徴 |
+|---|---|
+| Loose（既定） | ゆるいバネ。行き過ぎては戻る |
+| Tight | 硬いバネ・強い減衰。ほぼぴったり追従（比較用） |
+| Jelly | とても柔らかいバネと強いチェーン。ぷるぷるした紐のような動き |
+| Drift | 横に加速できず、グリップも低い。車のように大きく横滑りする |
+
+### パラメータ
+
+**Spring タブ**
 
 | キー | 表示名 | 既定 | 範囲 | 意味 |
 |---|---|---|---|---|
+| spring_k | Spring stiffness | 45 | 5–300 | バネ定数 |
+| damping | Damping (1=no bounce) | 0.22 | 0.02–1.5 | 減衰比 ζ |
+| mass | Mass | 1.2 | 0.3–5 | 先頭オプションの質量 |
+| mass_step | Mass step / option | 0.25 | 0–1.5 | 後ろのオプションほど重くなる割合 |
+| chain | Chain (0=trail 1=rope) | 0.45 | 0–1 | 軌跡追従と紐の比率 |
+| chain_length | Chain length | 70 | 20–200 | 紐の自然長 (px) |
+| delay_frames | Delay (frames) | 10 | 1–30 | 1 個あたりの遅延（移動フレーム） |
 | option_count | Options | 4 | 1–8 | オプション数 |
-| delay_frames | Delay (frames) | 10 | 2–30 | 1 個あたりの遅延（移動フレーム） |
-| mass | Mass | 1.4 | 0.5–6 | 先頭オプションの質量 |
-| mass_step | Mass step / option | 0.3 | 0–1.5 | 後続ほど重くなる割合 |
-| follow_gain | Follow gain | 8 | 1–15 | 距離→目標速度 |
-| drive | Drive | 18 | 4–40 | 目標速度へ寄せる力 |
-| turn_rate | Turn rate | 9 | 1–30 | 車体旋回速度 |
-| side_accel | Side accel (0=car) | 0.2 | 0–1 | 横方向への直接加速 |
-| grip | Grip | 5 | 0.2–20 | 横滑り減衰 |
-| drag | Drag | 0.6 | 0–4 | 空気抵抗 |
+
+**Car タブ**
+
+| キー | 表示名 | 既定 | 範囲 | 意味 |
+|---|---|---|---|---|
+| turn_rate | Turn rate | 9 | 0.5–30 | 車体旋回速度 |
+| side_accel | Side accel (0=car) | 0.4 | 0–1 | 横方向への直接加速 |
+| grip | Grip | 4 | 0.1–20 | 横滑り減衰 |
+| drag | Air drag | 0.3 | 0–4 | 空気抵抗 |
+| max_speed | Max speed | 2200 | 300–4000 | 最高速 |
+
+**Curl タブ**
+
+| キー | 表示名 | 既定 | 範囲 | 意味 |
+|---|---|---|---|---|
 | curl_strength | Curl strength | 2800 | 0–8000 | ノイズの力 |
 | curl_scale | Curl scale | 0.004 | 0.001–0.015 | ノイズの細かさ |
 | curl_speed | Curl time speed | 0.5 | 0–3 | ノイズの時間変化 |
 | curl_idle | Curl when idle | 0.25 | 0–1 | 静止時のノイズ残量 |
+
+**Game タブ**
+
+| キー | 表示名 | 既定 | 範囲 | 意味 |
+|---|---|---|---|---|
 | player_speed | Player speed | 720 | 300–1400 | 自機最高速 (px/s) |
 | drag_sensitivity | Drag sensitivity | 1.25 | 0.5–2.5 | DRAG モード感度 |
-| enemy_max | Enemy max | 10 | 1–30 | 敵の同時数 |
+| enemy_max | Enemy max | 10 | 0–30 | 敵の同時数（0 で敵なし） |
 | enemy_interval | Enemy interval (s) | 0.8 | 0.1–3 | 出現間隔 |
-
-ボタン: `Mode: STICK/DRAG`（操作切替）, `Debug: ON/OFF`（追従目標などの表示）, `Reset`。
 
 ### 調整の目安
 
-- もっと「重く」: Mass ↑ / Drive ↓
+- もっと「ルーズ」に: Spring stiffness ↓ / Damping ↓ / Mass ↑
+- もっと「ビヨンビヨン」に: Damping を 0.1 前後に
+- 紐でつながった感じ: Chain ↑（0.7〜1）
 - もっと「車っぽく滑る」: Grip ↓ / Side accel → 0 / Turn rate ↓
 - もっと「ふらふら」: Curl strength ↑ / Curl scale ↑（細かい渦）
-- ぴったり追従（比較用）: Curl strength 0, Side accel 1, Grip 20, Mass 0.5
 
 ## 8. ファイル構成
 
@@ -159,14 +213,14 @@ UI 文字は英語（Web 版の既定フォントに日本語グリフが無い�
 project.godot              プロジェクト設定（縦画面・Compatibility・タッチ設定）
 export_presets.cfg         Web / Android エクスポート設定
 scenes/main.tscn           エントリ（ノードは main.gd がコードで生成）
-scripts/tuning.gd          調整パラメータ（オートロード Tuning）
+scripts/tuning.gd          調整パラメータ・プリセット・保存（オートロード Tuning）
 scripts/main.gd            組み立て・入力・敵出現・スコア
 scripts/player.gd          自機・移動履歴
-scripts/option.gd          オプションの物理（バネ/車/カールノイズ）と衝突
+scripts/option.gd          オプションの物理（バネ/チェーン/車/カールノイズ）と衝突
 scripts/enemy.gd           敵
 scripts/explosion.gd       破壊エフェクト
 scripts/virtual_joystick.gd フローティング仮想スティック
-scripts/hud.gd             スコア・調整パネル
+scripts/hud.gd             スコア・デバッグパネル
 scripts/starfield.gd       背景
 ```
 

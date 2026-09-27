@@ -1,6 +1,7 @@
 extends Area2D
 ## オプション。自機の軌跡を遅れて追いかけるが、
-##  - 質量付きのバネ・ダンパ（重いほど遅れてオーバーシュートする）
+##  - 質量付きのバネ・ダンパ（重いほど・減衰比が小さいほどビヨンビヨン振れる）
+##  - 前のオプションとの紐（チェーン）によるバネの連結
 ##  - 車のような挙動（車体の向きへしか強く加速できず、横滑りはグリップで減衰）
 ##  - カールノイズによる流れ場（自機の移動量が大きいほど強い）
 ## によって、軌跡上の目標位置から自然にずれる。
@@ -11,18 +12,21 @@ const TRAIL_LEN := 14
 
 var index := 0
 var player: Node2D
+var leader: Node2D   # 1 つ前のオプション（先頭は自機）。チェーンの相手
 var noise: FastNoiseLite
 
 var velocity := Vector2.ZERO
 var heading := -PI / 2.0
 var _time := 0.0
 var _target := Vector2.ZERO
+var _chain_target := Vector2.ZERO
 var _trail: Array[Vector2] = []
 var _pulse := 0.0
 
 
-func setup(p_player: Node2D, p_index: int, p_noise: FastNoiseLite) -> void:
+func setup(p_player: Node2D, p_leader: Node2D, p_index: int, p_noise: FastNoiseLite) -> void:
 	player = p_player
+	leader = p_leader
 	index = p_index
 	noise = p_noise
 	position = player.get_past_position(_delay_frames())
@@ -55,16 +59,25 @@ func _physics_process(delta: float) -> void:
 		return
 	var m := mass()
 
-	# 1) 追従目標: 自機の過去位置
+	# 1) 追従目標: 自機の過去位置と、前のオプションから紐の長さだけ離れた位置をブレンド
 	_target = player.get_past_position(_delay_frames())
+	var chain := Tuning.v("chain")
+	if chain > 0.0 and leader != null:
+		var away := position - leader.position
+		if away.length_squared() < 1.0:
+			away = Vector2.DOWN
+		_chain_target = leader.position + away.normalized() * Tuning.v("chain_length")
+		_target = _target.lerp(_chain_target, chain)
 
-	# 2) 目標速度へ寄せる加速度（バネ・ダンパ。質量が大きいほど弱い）
-	var desired_vel: Vector2 = (_target - position) * Tuning.v("follow_gain")
-	var accel: Vector2 = (desired_vel - velocity) * Tuning.v("drive") / m
+	# 2) バネ・ダンパ: F = k·(目標 - 位置) - c·速度,  c = 2ζ√(k·m)
+	var k := Tuning.v("spring_k")
+	var c := 2.0 * Tuning.v("damping") * sqrt(k * m)
+	var to_target := _target - position
+	var accel: Vector2 = (k * to_target - c * velocity) / m
 
-	# 3) 車の挙動: 車体の向きは目標速度の方向へ有限の速さでしか回らない
-	if desired_vel.length() > 30.0:
-		heading = rotate_toward(heading, desired_vel.angle(), Tuning.v("turn_rate") / m * delta)
+	# 3) 車の挙動: 車体は目標の方へハンドルを切るが、有限の速さでしか回らない
+	if to_target.length() > 24.0:
+		heading = rotate_toward(heading, to_target.angle(), Tuning.v("turn_rate") / m * delta)
 	var fwd := Vector2.from_angle(heading)
 	var side := fwd.orthogonal()
 	# 前後方向（アクセル/ブレーキ）は満額、横方向は side_accel 分だけ
@@ -127,8 +140,30 @@ func _draw() -> void:
 	draw_line(Vector2.ZERO, Vector2.from_angle(heading) * (r + 10.0), Color(1, 1, 1, 0.8), 3.0, true)
 
 	if Tuning.i("debug_draw") == 1:
+		# バネ: 伸びるほど緑 → 赤
 		var tl := to_local(_target)
-		draw_line(Vector2.ZERO, tl, Color(0.4, 1.0, 0.5, 0.6), 2.0)
-		draw_line(tl + Vector2(-8, 0), tl + Vector2(8, 0), Color(0.4, 1.0, 0.5), 2.0)
-		draw_line(tl + Vector2(0, -8), tl + Vector2(0, 8), Color(0.4, 1.0, 0.5), 2.0)
+		var stretch := clampf(tl.length() / 200.0, 0.0, 1.0)
+		var spring_col := Color(0.4, 1.0, 0.5).lerp(Color(1.0, 0.25, 0.3), stretch)
+		_draw_zigzag(Vector2.ZERO, tl, spring_col)
+		draw_line(tl + Vector2(-8, 0), tl + Vector2(8, 0), spring_col, 2.0)
+		draw_line(tl + Vector2(0, -8), tl + Vector2(0, 8), spring_col, 2.0)
+		# 紐（チェーン）
+		if Tuning.v("chain") > 0.0 and leader != null:
+			draw_line(Vector2.ZERO, to_local(leader.position), Color(0.8, 0.6, 1.0, 0.25 + 0.5 * Tuning.v("chain")), 2.0)
+		# 速度
 		draw_line(Vector2.ZERO, velocity * 0.08, Color(0.5, 0.7, 1.0, 0.8), 2.0)
+
+
+func _draw_zigzag(a: Vector2, b: Vector2, col: Color) -> void:
+	var d := b - a
+	var len := d.length()
+	if len < 4.0:
+		return
+	var n := d / len
+	var side := n.orthogonal() * 7.0
+	var coils := 8
+	var pts := PackedVector2Array([a])
+	for j in range(1, coils * 2):
+		pts.append(a + d * (float(j) / (coils * 2)) + side * (1.0 if j % 2 == 0 else -1.0))
+	pts.append(b)
+	draw_polyline(pts, col, 2.0, true)

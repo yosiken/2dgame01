@@ -65,7 +65,8 @@ func _rebuild_options() -> void:
 		_options.pop_back().queue_free()
 	while _options.size() < count:
 		var o: Area2D = OptionOrb.new()
-		o.setup(player, _options.size(), noise)
+		var leader: Node2D = _options.back() if not _options.is_empty() else player
+		o.setup(player, leader, _options.size(), noise)
 		_option_layer.add_child(o)
 		_options.append(o)
 
